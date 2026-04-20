@@ -85,6 +85,7 @@ const EMPTY_STATE = {
   habits: {},
   weekKey: getWeekKey(),
   allMissions: SEED_MISSIONS,
+  tables: [],
 }
 
 // ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
@@ -120,16 +121,7 @@ function AuthScreen({ onLogin }) {
     setLoading(false)
   }
 
-  function handlePinChange(i, val) {
-    if (!/^\d?$/.test(val)) return
-    const next = [...pin]; next[i] = val; setPin(next)
-    if (val && i < 3) pinRefs[i + 1].current?.focus()
-  }
 
-  function handlePinKey(i, e) {
-    if (e.key === 'Backspace' && !pin[i] && i > 0) pinRefs[i - 1].current?.focus()
-    if (e.key === 'Enter') handleSubmit()
-  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#0A0B0E', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -162,15 +154,16 @@ function AuthScreen({ onLogin }) {
             placeholder="ej: andres" style={{ ...INP, marginBottom: 16 }} />
 
           <label style={LBL}>PIN de 4 dígitos</label>
-          <div style={{ display: 'flex', gap: 10, marginTop: 5, marginBottom: 24 }}>
-            {[0, 1, 2, 3].map(i => (
-              <input key={i} ref={pinRefs[i]} type="password" inputMode="numeric" maxLength={1}
-                value={pin[i]} onChange={e => handlePinChange(i, e.target.value)} onKeyDown={e => handlePinKey(i, e)}
-                style={{ flex: 1, background: '#161820', border: '1px solid #2E3347', borderRadius: 8,
-                  padding: '12px 0', color: '#E2E4ED', fontSize: 22, textAlign: 'center',
-                  fontFamily: "'Rajdhani',sans-serif", outline: 'none' }} />
-            ))}
-          </div>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            value={pinStr}
+            onChange={e => { if (/^\d{0,4}$/.test(e.target.value)) setPin(e.target.value.split('')) }}
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            placeholder="••••"
+            style={{ ...INP, marginBottom: 24, fontSize: 24, letterSpacing: 8, textAlign: 'center' }}
+          />
 
           {error && (
             <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8,
@@ -452,7 +445,7 @@ export default function App() {
           <div className="header-inner">
             <div className="logo">LIFE OS</div>
             <nav className="nav">
-              {[['dashboard','Dashboard'],['missions','Misiones'],['habits','Hábitos'],['achievements','Logros']].map(([v, l]) => (
+              {[['dashboard','Dashboard'],['missions','Misiones'],['habits','Hábitos'],['achievements','Logros'],['tables','Tablas']].map(([v, l]) => (
                 <button key={v} className={`nav-btn${tab === v ? ' active' : ''}`} onClick={() => setTab(v)}>{l}</button>
               ))}
             </nav>
@@ -480,7 +473,7 @@ export default function App() {
               <div className="hero-accent" style={{ background: `linear-gradient(90deg,transparent,${lvl.color},transparent)` }} />
               <div className="hero-top">
                 <div>
-                  <div className="hero-name">Andrés</div>
+                  <div className="hero-name" style={{textTransform:'capitalize'}}>{user.username}</div>
                   <div className="hero-subtitle">{lvl.title} · Nómada Digital en Entrenamiento</div>
                 </div>
                 <div className="hero-stats">
@@ -655,6 +648,10 @@ export default function App() {
             </div>
           </>}
 
+
+          {/* ══ TABLES ══ */}
+          {tab === 'tables' && <TablesSection state={state} setState={setState} pushUndo={pushUndo} />}
+
         </main>
       </div>
 
@@ -707,6 +704,349 @@ function MissionRow({ m, done, onToggle, onEdit, onDelete, compact }) {
     </div>
   )
 }
+
+
+// ─── TABLES SECTION ───────────────────────────────────────────────────────────
+
+function TablesSection({ state, setState, pushUndo }) {
+  const [view,       setView]       = useState(null)   // null = list, tableId = detail
+  const [tableModal, setTableModal] = useState(false)  // create table modal
+  const [colModal,   setColModal]   = useState(false)  // add column modal
+  const [rowModal,   setRowModal]   = useState(null)   // null | row object
+
+  const tables = state.tables || []
+  const currentTable = tables.find(t => t.id === view)
+
+  function createTable(name) {
+    const t = { id: uid(), name, columns: [], rows: [] }
+    setState(prev => {
+      pushUndo(prev, `Crear tabla "${name}"`)
+      return { ...prev, tables: [...(prev.tables || []), t] }
+    })
+    setTableModal(false)
+    setView(t.id)
+  }
+
+  function deleteTable(tId) {
+    const t = tables.find(x => x.id === tId)
+    setState(prev => {
+      pushUndo(prev, `Borrar tabla "${t?.name}"`)
+      return { ...prev, tables: (prev.tables || []).filter(x => x.id !== tId) }
+    })
+    setView(null)
+  }
+
+  function addColumn(tId, col) {
+    setState(prev => {
+      pushUndo(prev, `Columna "${col.name}"`)
+      return {
+        ...prev,
+        tables: (prev.tables || []).map(t => t.id !== tId ? t : {
+          ...t,
+          columns: [...t.columns, col],
+          rows: t.rows.map(r => ({ ...r, [col.id]: col.type === 'checkbox' ? false : '' }))
+        })
+      }
+    })
+    setColModal(false)
+  }
+
+  function deleteColumn(tId, colId) {
+    setState(prev => {
+      pushUndo(prev, 'Borrar columna')
+      return {
+        ...prev,
+        tables: (prev.tables || []).map(t => t.id !== tId ? t : {
+          ...t,
+          columns: t.columns.filter(c => c.id !== colId),
+          rows: t.rows.map(r => { const nr = { ...r }; delete nr[colId]; return nr })
+        })
+      }
+    })
+  }
+
+  function addRow(tId) {
+    const t = tables.find(x => x.id === tId)
+    if (!t) return
+    const row = { id: uid(), _name: '' }
+    t.columns.forEach(c => { row[c.id] = c.type === 'checkbox' ? false : '' })
+    setState(prev => {
+      pushUndo(prev, 'Nueva fila')
+      return { ...prev, tables: (prev.tables || []).map(x => x.id !== tId ? x : { ...x, rows: [...x.rows, row] }) }
+    })
+    setRowModal({ ...row, _tableId: tId })
+  }
+
+  function saveRow(tId, row) {
+    setState(prev => {
+      pushUndo(prev, `Editar fila`)
+      return {
+        ...prev,
+        tables: (prev.tables || []).map(t => t.id !== tId ? t : {
+          ...t, rows: t.rows.map(r => r.id === row.id ? row : r)
+        })
+      }
+    })
+    setRowModal(null)
+  }
+
+  function deleteRow(tId, rowId) {
+    setState(prev => {
+      pushUndo(prev, 'Borrar fila')
+      return {
+        ...prev,
+        tables: (prev.tables || []).map(t => t.id !== tId ? t : {
+          ...t, rows: t.rows.filter(r => r.id !== rowId)
+        })
+      }
+    })
+  }
+
+  function toggleCell(tId, rowId, colId) {
+    setState(prev => ({
+      ...prev,
+      tables: (prev.tables || []).map(t => t.id !== tId ? t : {
+        ...t, rows: t.rows.map(r => r.id !== rowId ? r : { ...r, [colId]: !r[colId] })
+      })
+    }))
+  }
+
+  // ── Table list view ──────────────────────────────────────────────────────
+  if (!view) return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+        <div>
+          <div className="section-title">Tablas</div>
+          <div className="section-sub">Creá tablas personalizadas para trackear lo que quieras</div>
+        </div>
+        <button onClick={() => setTableModal(true)} style={{ ...BTN, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>
+          + Nueva tabla
+        </button>
+      </div>
+
+      {tables.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6B7280' }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>📋</div>
+          <div style={{ fontFamily: "'Cinzel',serif", fontSize: 14, marginBottom: 8 }}>Sin tablas todavía</div>
+          <div style={{ fontSize: 13, marginBottom: 20 }}>Creá una tabla para empezar a trackear materias, proyectos o lo que quieras</div>
+          <button onClick={() => setTableModal(true)} style={{ ...BTN, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>+ Nueva tabla</button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(240px,1fr))', gap: 12 }}>
+          {tables.map(t => (
+            <div key={t.id} className="panel" style={{ cursor: 'pointer', transition: 'transform .15s' }}
+              onClick={() => setView(t.id)}>
+              <div style={{ padding: '20px 20px 16px' }}>
+                <div style={{ fontFamily: "'Cinzel',serif", fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{t.name}</div>
+                <div style={{ fontSize: 12, color: '#6B7280' }}>
+                  {t.columns.length} columnas · {t.rows.length} filas
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #252836', padding: '10px 20px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={e => { e.stopPropagation(); deleteTable(t.id) }}
+                  style={{ background: 'none', border: 'none', color: 'rgba(239,68,68,.5)', cursor: 'pointer', fontSize: 12 }}>
+                  Eliminar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tableModal && <CreateTableModal onSave={createTable} onClose={() => setTableModal(false)} />}
+    </>
+  )
+
+  // ── Table detail view ────────────────────────────────────────────────────
+  if (!currentTable) { setView(null); return null }
+  const { columns, rows } = currentTable
+
+  return (
+    <>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <button onClick={() => setView(null)}
+          style={{ background: 'none', border: '1px solid #252836', borderRadius: 6, color: '#6B7280', cursor: 'pointer', padding: '5px 10px', fontSize: 12 }}>
+          ← Volver
+        </button>
+        <div className="section-title">{currentTable.name}</div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button onClick={() => setColModal(true)}
+            style={{ ...BTN, background: 'transparent', color: '#A594F9', borderColor: '#2E3347' }}>
+            + Columna
+          </button>
+          <button onClick={() => addRow(view)}
+            style={{ ...BTN, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>
+            + Fila
+          </button>
+        </div>
+      </div>
+
+      {/* Table */}
+      {columns.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#6B7280', background: '#0F1117', border: '1px solid #252836', borderRadius: 12 }}>
+          <div style={{ fontSize: 13, marginBottom: 12 }}>Agregá columnas para empezar a completar la tabla</div>
+          <button onClick={() => setColModal(true)} style={{ ...BTN, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>+ Agregar columna</button>
+        </div>
+      ) : (
+        <div style={{ background: '#0F1117', border: '1px solid #252836', borderRadius: 12, overflow: 'hidden' }}>
+          {/* Table header */}
+          <div style={{ display: 'grid', gridTemplateColumns: `200px ${columns.map(c => c.type === 'checkbox' ? '90px' : '1fr').join(' ')} 60px`,
+            background: '#161820', borderBottom: '1px solid #252836' }}>
+            <div style={TH}>Nombre</div>
+            {columns.map(c => (
+              <div key={c.id} style={{ ...TH, display: 'flex', alignItems: 'center', justifyContent: c.type === 'checkbox' ? 'center' : 'flex-start', gap: 6 }}>
+                <span>{c.name}</span>
+                <button onClick={() => deleteColumn(view, c.id)}
+                  style={{ background: 'none', border: 'none', color: 'rgba(239,68,68,.4)', cursor: 'pointer', fontSize: 10, padding: '0 2px', lineHeight: 1 }}>✕</button>
+              </div>
+            ))}
+            <div style={TH} />
+          </div>
+
+          {/* Rows */}
+          {rows.length === 0 ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: '#6B7280', fontSize: 13 }}>
+              Sin filas todavía. Clickeá "+ Fila" para agregar.
+            </div>
+          ) : rows.map(row => (
+            <div key={row.id} style={{ display: 'grid', gridTemplateColumns: `200px ${columns.map(c => c.type === 'checkbox' ? '90px' : '1fr').join(' ')} 60px`,
+              borderBottom: '1px solid #252836', transition: 'background .1s' }}
+              className="table-row">
+              <div style={TD}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{row._name || <span style={{ color: '#374151' }}>Sin nombre</span>}</span>
+              </div>
+              {columns.map(c => (
+                <div key={c.id} style={{ ...TD, justifyContent: c.type === 'checkbox' ? 'center' : 'flex-start' }}>
+                  {c.type === 'checkbox' ? (
+                    <div className={`circle${row[c.id] ? ' done' : ''}`} style={{ width: 20, height: 20 }}
+                      onClick={() => toggleCell(view, row.id, c.id)}>
+                      {row[c.id] && <div className="checkmark" />}
+                    </div>
+                  ) : c.type === 'number' ? (
+                    <span style={{ fontSize: 13, color: row[c.id] ? '#E2E4ED' : '#374151' }}>{row[c.id] || '—'}</span>
+                  ) : (
+                    <span style={{ fontSize: 13, color: row[c.id] ? '#E2E4ED' : '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row[c.id] || '—'}</span>
+                  )}
+                </div>
+              ))}
+              <div style={{ ...TD, justifyContent: 'center', gap: 4 }}>
+                <button onClick={() => setRowModal({ ...row, _tableId: view })}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B7280', fontSize: 12, padding: '2px 4px' }}>✏️</button>
+                <button onClick={() => deleteRow(view, row.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(239,68,68,.5)', fontSize: 12, padding: '2px 4px' }}>🗑</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {colModal && <AddColumnModal onSave={col => addColumn(view, col)} onClose={() => setColModal(false)} />}
+      {rowModal && <EditRowModal row={rowModal} columns={columns} onSave={r => saveRow(r._tableId, r)} onClose={() => setRowModal(null)} />}
+    </>
+  )
+}
+
+// ── Sub-modals ────────────────────────────────────────────────────────────────
+
+function CreateTableModal({ onSave, onClose }) {
+  const [name, setName] = useState('')
+  return (
+    <Modal title="NUEVA TABLA" onClose={onClose}>
+      <label style={LBL}>Nombre de la tabla</label>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="ej: Materias 1° cuatrimestre"
+        style={{ ...INP, marginBottom: 20 }} onKeyDown={e => e.key === 'Enter' && name.trim() && onSave(name.trim())} autoFocus />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onClose} style={{ ...BTN, flex: 1, background: 'transparent', borderColor: '#2E3347', color: '#6B7280' }}>Cancelar</button>
+        <button onClick={() => name.trim() && onSave(name.trim())} style={{ ...BTN, flex: 2, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>Crear tabla</button>
+      </div>
+    </Modal>
+  )
+}
+
+function AddColumnModal({ onSave, onClose }) {
+  const [name, setName] = useState('')
+  const [type, setType] = useState('text')
+  return (
+    <Modal title="NUEVA COLUMNA" onClose={onClose}>
+      <label style={LBL}>Nombre de la columna</label>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="ej: Parcial 1"
+        style={{ ...INP, marginBottom: 14 }} autoFocus onKeyDown={e => e.key === 'Enter' && name.trim() && onSave({ id: uid(), name: name.trim(), type })} />
+      <label style={LBL}>Tipo</label>
+      <div style={{ display: 'flex', gap: 8, marginTop: 6, marginBottom: 20 }}>
+        {[['text','Texto'],['checkbox','Checkbox'],['number','Número']].map(([v, l]) => (
+          <button key={v} onClick={() => setType(v)}
+            style={{ flex: 1, padding: '8px 0', border: `1px solid ${type === v ? '#7C6AE8' : '#2E3347'}`,
+              borderRadius: 8, background: type === v ? 'rgba(124,106,232,.2)' : 'transparent',
+              color: type === v ? '#A594F9' : '#6B7280', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              fontFamily: "'Rajdhani',sans-serif" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onClose} style={{ ...BTN, flex: 1, background: 'transparent', borderColor: '#2E3347', color: '#6B7280' }}>Cancelar</button>
+        <button onClick={() => name.trim() && onSave({ id: uid(), name: name.trim(), type })}
+          style={{ ...BTN, flex: 2, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>Agregar</button>
+      </div>
+    </Modal>
+  )
+}
+
+function EditRowModal({ row, columns, onSave, onClose }) {
+  const [data, setData] = useState({ ...row })
+  return (
+    <Modal title="EDITAR FILA" onClose={onClose}>
+      <label style={LBL}>Nombre</label>
+      <input value={data._name || ''} onChange={e => setData(d => ({ ...d, _name: e.target.value }))}
+        placeholder="Nombre de esta fila" style={{ ...INP, marginBottom: 14 }} autoFocus />
+      {columns.map(c => (
+        <div key={c.id} style={{ marginBottom: 14 }}>
+          <label style={LBL}>{c.name}</label>
+          {c.type === 'checkbox' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+              <div className={`circle${data[c.id] ? ' done' : ''}`} style={{ width: 22, height: 22, cursor: 'pointer' }}
+                onClick={() => setData(d => ({ ...d, [c.id]: !d[c.id] }))}>
+                {data[c.id] && <div className="checkmark" />}
+              </div>
+              <span style={{ fontSize: 13, color: data[c.id] ? '#10B981' : '#6B7280' }}>
+                {data[c.id] ? 'Completado' : 'Pendiente'}
+              </span>
+            </div>
+          ) : (
+            <input value={data[c.id] || ''} onChange={e => setData(d => ({ ...d, [c.id]: e.target.value }))}
+              type={c.type === 'number' ? 'number' : 'text'}
+              placeholder={c.type === 'number' ? '0' : `Valor para ${c.name}`}
+              style={{ ...INP, marginTop: 5 }} />
+          )}
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        <button onClick={onClose} style={{ ...BTN, flex: 1, background: 'transparent', borderColor: '#2E3347', color: '#6B7280' }}>Cancelar</button>
+        <button onClick={() => onSave(data)} style={{ ...BTN, flex: 2, background: '#7C6AE8', borderColor: '#7C6AE8', color: 'white' }}>Guardar</button>
+      </div>
+    </Modal>
+  )
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+      <div style={{ background: '#0F1117', border: '1px solid #252836', borderRadius: 14,
+        padding: 24, width: '100%', maxWidth: 440, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2,
+          background: 'linear-gradient(90deg,transparent,#7C6AE8,transparent)' }} />
+        <div style={{ fontFamily: "'Cinzel',serif", fontSize: 13, fontWeight: 600, letterSpacing: 1, marginBottom: 20 }}>{title}</div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const TH = { padding: '10px 14px', fontSize: 11, fontWeight: 600, color: '#6B7280', letterSpacing: 1, textTransform: 'uppercase', display: 'flex', alignItems: 'center' }
+const TD = { padding: '10px 14px', fontSize: 13, display: 'flex', alignItems: 'center', minWidth: 0 }
 
 // ─── STYLE CONSTANTS ──────────────────────────────────────────────────────────
 
@@ -819,4 +1159,5 @@ select option{background:#161820;color:#E2E4ED}
 .toast-xp{background:#0D1F1A;border-color:#10B981;color:#34D399}
 .toast-level{background:#1A0E2B;border-color:#7C6AE8;color:#A594F9}
 .toast-achieve{background:#1F1600;border-color:#D97706;color:#FCD34D}
+.table-row:hover{background:#161820}.table-row:last-child{border-bottom:none!important}
 `
