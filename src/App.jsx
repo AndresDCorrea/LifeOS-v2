@@ -802,13 +802,36 @@ function TablesSection({ state, setState, pushUndo }) {
     })
   }
 
-  function toggleCell(tId, rowId, colId) {
-    setState(prev => ({
-      ...prev,
-      tables: (prev.tables || []).map(t => t.id !== tId ? t : {
-        ...t, rows: t.rows.map(r => r.id !== rowId ? r : { ...r, [colId]: !r[colId] })
-      })
-    }))
+  const CELL_XP = 10  // Same as a daily mission
+
+  function toggleCell(tId, rowId, colId, showToastFn) {
+    setState(prev => {
+      const table = (prev.tables || []).find(t => t.id === tId)
+      const row   = table?.rows.find(r => r.id === rowId)
+      const col   = table?.columns.find(c => c.id === colId)
+      if (!row || !col || col.type !== 'checkbox') return prev
+
+      const wasChecked = !!row[colId]
+      const xpDelta    = wasChecked ? -CELL_XP : CELL_XP
+      const newXp      = Math.max(0, prev.xp + xpDelta)
+
+      if (!wasChecked) {
+        const oldLvl = getLvl(prev.xp).level
+        const newLvl = getLvl(newXp).level
+        setTimeout(() => {
+          if (newLvl > oldLvl) showToast(`⚡ Nivel ${newLvl} — ${getLvl(newXp).title}!`, 'level')
+          else showToast(`+${CELL_XP} XP · ${col.name}`, 'xp')
+        }, 50)
+      }
+
+      return {
+        ...prev,
+        xp: newXp,
+        tables: (prev.tables || []).map(t => t.id !== tId ? t : {
+          ...t, rows: t.rows.map(r => r.id !== rowId ? r : { ...r, [colId]: !r[colId] })
+        })
+      }
+    })
   }
 
   // ── Table list view ──────────────────────────────────────────────────────
@@ -920,7 +943,7 @@ function TablesSection({ state, setState, pushUndo }) {
                 <div key={c.id} style={{ ...TD, justifyContent: c.type === 'checkbox' ? 'center' : 'flex-start' }}>
                   {c.type === 'checkbox' ? (
                     <div className={`circle${row[c.id] ? ' done' : ''}`} style={{ width: 20, height: 20 }}
-                      onClick={() => toggleCell(view, row.id, c.id)}>
+                      onClick={() => toggleCell(view, row.id, c.id, showToast)}>
                       {row[c.id] && <div className="checkmark" />}
                     </div>
                   ) : c.type === 'number' ? (
