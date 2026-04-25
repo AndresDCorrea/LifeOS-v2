@@ -940,10 +940,12 @@ function TablesSection({ state, setState, pushUndo }) {
                 <span style={{ fontSize: 13, fontWeight: 500 }}>{row._name || <span style={{ color: '#374151' }}>Sin nombre</span>}</span>
               </div>
               {columns.map(c => (
-                <div key={c.id} style={{ ...TD, justifyContent: c.type === 'checkbox' ? 'center' : 'flex-start' }}>
+                <div key={c.id} style={{ ...TD, justifyContent: c.type === 'checkbox' ? 'center' : 'flex-start', cursor: c.type === 'checkbox' ? 'pointer' : 'default' }}
+                  onClick={c.type === 'checkbox' ? e => { e.stopPropagation(); toggleCell(view, row.id, c.id, showToast) } : undefined}>
                   {c.type === 'checkbox' ? (
-                    <div className={`circle${row[c.id] ? ' done' : ''}`} style={{ width: 20, height: 20 }}
-                      onClick={() => toggleCell(view, row.id, c.id, showToast)}>
+                    <div className={`circle${row[c.id] ? ' done' : ''}`}
+                      style={{ width: 22, height: 22, cursor: 'pointer', flexShrink: 0 }}
+                      onClick={e => { e.stopPropagation(); toggleCell(view, row.id, c.id, showToast) }}>
                       {row[c.id] && <div className="checkmark" />}
                     </div>
                   ) : c.type === 'number' ? (
